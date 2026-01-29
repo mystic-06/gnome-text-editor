@@ -156,6 +156,19 @@ text_viewer_window__update_cursor_position(GtkTextBuffer *buffer,
                                            TextViewerWindow *self)
 {
     int cursor_pos = 0;
+
+    //Get the cursor position property's value
+    g_object_get (buffer, "cursor-position", &cursor_pos, NULL);
+
+    //iterator for the location of the cursor
+    GtkTextIter iter;
+    gtk_text_buffer_get_iter_at_offset (buffer, &iter, cursor_pos);
+
+    g_autofree char *cursor_str = g_strdup_printf ("Ln %d, Col %d",
+                                                   gtk_text_iter_get_line (&iter) + 1,
+                                                   gtk_text_iter_get_line_offset (&iter) + 1);
+
+    gtk_label_set_text (self->cursor_pos, cursor_str);
 }
 
 static void
