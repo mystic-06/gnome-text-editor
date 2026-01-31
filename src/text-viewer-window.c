@@ -33,6 +33,7 @@ struct _TextViewerWindow
     GtkTextView *main_text_view;
     GtkButton *open_button;
     GtkLabel *cursor_pos;
+    AdwToastOverlay *toast_overlay;
 };
 
 G_DEFINE_FINAL_TYPE (TextViewerWindow, text_viewer_window, ADW_TYPE_APPLICATION_WINDOW)
@@ -61,6 +62,7 @@ text_viewer_window_class_init (TextViewerWindowClass *klass)
     gtk_widget_class_bind_template_child (widget_class, TextViewerWindow, main_text_view);
     gtk_widget_class_bind_template_child (widget_class, TextViewerWindow, open_button);
     gtk_widget_class_bind_template_child (widget_class, TextViewerWindow, cursor_pos);
+    gtk_widget_class_bind_template_child (widget_class, TextViewerWindow, toast_overlay);
 }
 
 static void
@@ -68,66 +70,84 @@ open_file_complete(GObject *source_object,
                    GAsyncResult *result,
                    TextViewerWindow *self )
 {
-  GFile *file = G_FILE(source_object);
+    GFile *file = G_FILE(source_object);
 
-  g_autofree char *contents = NULL;
-  gsize length = 0;
+    g_autofree char *contents = NULL;
+    gsize length = 0;
 
-  g_autoptr (GError) error = NULL;
+    g_autoptr (GError) error = NULL;
 
-  // Complete the asynchronous operation; this function will either
-  // give you the contents of the file as a byte array, or will
-  // set the error argument
+    // Complete the asynchronous operation; this function will either
+    // give you the contents of the file as a byte array, or will
+    // set the error argument
 
-  g_file_load_contents_finish (file,
-                               result,
-                               &contents,
-                               &length,
-                               NULL,
-                               &error);
+    g_file_load_contents_finish (file,
+                                result,
+                                &contents,
+                                &length,
+                                NULL,
+                                &error);
 
-  if (error != NULL)
+    if (error != NULL)
+      {
+        g_printerr ("Unable to open “%s”: %s\n",
+                      g_file_peek_path (file),
+                      error->message);
+        return;
+      }
+
+    if (!g_utf8_validate (contents, length, NULL))
+      {
+        g_printerr ("Unable to load the contents of “%s”: "
+                    "the file is not encoded with UTF-8\n",
+                    g_file_peek_path (file));
+        return;
+      }
+
+    g_autofree char *display_name = NULL;
+    g_autoptr (GFileInfo) info = g_file_query_info (file, "standard::display-name", G_FILE_QUERY_INFO_NONE, NULL, NULL);
+
+    if(info != NULL)
+      {
+        display_name = g_strdup (g_file_info_get_attribute_string (info, "standard::display-name"));
+      }
+    else
+      {
+        display_name = g_file_get_basename (file);
+      }
+
+    //Show toast when error occurs
+    if (error != NULL)
     {
-      g_printerr ("Unable to open “%s”: %s\n",
-                  g_file_peek_path (file),
-                  error->message);
-      return;
+        g_autofree char *msg = g_strdup_printf ("Unable to open `%s`", display_name);
+
+        adw_toast_overlay_add_toast (self->toast_overlay, adw_toast_new (msg));
     }
 
-  if (!g_utf8_validate (contents, length, NULL))
+    if (!g_utf8_validate (contents, length, NULL))
     {
-      g_printerr ("Unable to load the contents of “%s”: "
-                  "the file is not encoded with UTF-8\n",
-                  g_file_peek_path (file));
-      return;
+        g_autofree char *msg = g_strdup_printf ("Invalid text encoding for `%s`", display_name);
+
+        adw_toast_overlay_add_toast (self->toast_overlay, adw_toast_new (msg));
+        return;
     }
 
-  g_autofree char *display_name = NULL;
-  g_autoptr (GFileInfo) info = g_file_query_info (file, "standard::display-name", G_FILE_QUERY_INFO_NONE, NULL, NULL);
+    // Retrieve the GtkTextBuffer instance that stores the
+    // text displayed by the GtkTextView widget
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer (self->main_text_view);
 
-  if(info != NULL)
-    {
-      display_name = g_strdup (g_file_info_get_attribute_string (info, "standard::display-name"));
-    }
-  else
-    {
-      display_name = g_file_get_basename (file);
-    }
+    // Set the text using the contents of the file
+    gtk_text_buffer_set_text (buffer, contents, length);
 
-  // Retrieve the GtkTextBuffer instance that stores the
-  // text displayed by the GtkTextView widget
-  GtkTextBuffer *buffer = gtk_text_view_get_buffer (self->main_text_view);
+    // Reposition the cursor so it's at the start of the text
+    GtkTextIter start;
+    gtk_text_buffer_get_start_iter (buffer, &start);
+    gtk_text_buffer_place_cursor (buffer, &start);
 
-  // Set the text using the contents of the file
-  gtk_text_buffer_set_text (buffer, contents, length);
+    gtk_window_set_title (GTK_WINDOW(self), display_name);
+}
 
-  // Reposition the cursor so it's at the start of the text
-  GtkTextIter start;
-  gtk_text_buffer_get_start_iter (buffer, &start);
-  gtk_text_buffer_place_cursor (buffer, &start);
 
-  gtk_window_set_title (GTK_WINDOW(self), display_name);
- }
 static void
 open_file (TextViewerWindow *self,
           GFile *file)
@@ -137,6 +157,7 @@ open_file (TextViewerWindow *self,
                               (GAsyncReadyCallback) open_file_complete,
                               self);
 }
+
 static void
 on_open_response(GObject *source,
                  GAsyncResult *result,
@@ -171,6 +192,7 @@ save_file_complete(GObject *source_object,
                    gpointer user_data)
 {
     GFile *file = G_FILE (source_object);
+    TextViewerWindow *self = user_data;
 
     g_autoptr (GError) error = NULL;
     g_file_replace_contents_finish (file, result, NULL, &error);
@@ -197,6 +219,14 @@ save_file_complete(GObject *source_object,
                     display_name,
                     error->message);
     }
+
+    g_autofree char *msg = NULL;
+    if (error != NULL)
+        msg = g_strdup_printf("Unable to save as`%s`", display_name);
+    else
+        msg = g_strdup_printf("Saved as `%s`", display_name);
+
+    adw_toast_overlay_add_toast (self->toast_overlay, adw_toast_new(msg));
 }
 
 static void
