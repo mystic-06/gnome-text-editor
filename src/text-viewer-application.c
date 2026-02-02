@@ -26,7 +26,9 @@
 
 struct _TextViewerApplication
 {
-	AdwApplication parent_instance;
+    AdwApplication parent_instance;
+
+    GSettings *settings;
 };
 
 G_DEFINE_FINAL_TYPE (TextViewerApplication, text_viewer_application, ADW_TYPE_APPLICATION)
@@ -44,6 +46,14 @@ text_viewer_application_new (const char        *application_id,
 	                     NULL);
 }
 
+static void
+text_viewer_application_dispose(GObject *gobject)
+{
+    TextViewerApplication *self = TEXT_VIEWER_APPLICATION (gobject);
+
+    g_clear_object(&self->settings);
+    G_OBJECT_CLASS (text_viewer_application_parent_class)->dispose(gobject);
+}
 static void
 text_viewer_application_activate (GApplication *app)
 {
@@ -64,9 +74,12 @@ text_viewer_application_activate (GApplication *app)
 static void
 text_viewer_application_class_init (TextViewerApplicationClass *klass)
 {
-	GApplicationClass *app_class = G_APPLICATION_CLASS (klass);
+    GApplicationClass *app_class = G_APPLICATION_CLASS (klass);
+    GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
 
-	app_class->activate = text_viewer_application_activate;
+    gobject_class->dispose = text_viewer_application_dispose;
+
+    app_class->activate = text_viewer_application_activate;
 }
 
 static void
@@ -141,12 +154,24 @@ change_color_scheme(GSimpleAction *action,
     }
 
     g_simple_action_set_state(action, new_state);
+
+    g_settings_set_boolean (self->settings, "dark-mode", dark_mode);
 }
 
 static void
 text_viewer_application_init (TextViewerApplication *self)
 {
-    g_autoptr (GSimpleAction) dark_action = g_simple_action_new_stateful ("dark-mode", NULL, g_variant_new_boolean (FALSE));
+    self->settings = g_settings_new ("com.example.TextViewer");
+
+    gboolean dark_mode = g_settings_get_boolean(self->settings, "dark-mode");
+    AdwStyleManager *style_manager = adw_style_manager_get_default();
+
+    if (dark_mode)
+        adw_style_manager_set_color_scheme (style_manager, ADW_COLOR_SCHEME_FORCE_DARK);
+    else
+        adw_style_manager_set_color_scheme (style_manager, ADW_COLOR_SCHEME_DEFAULT);
+
+    g_autoptr (GSimpleAction) dark_action = g_simple_action_new_stateful ("dark-mode", NULL, g_variant_new_boolean (dark_mode));
     g_signal_connect(dark_action, "activate", G_CALLBACK(toggle_dark_mode), self);
     g_signal_connect (dark_action, "change-state", G_CALLBACK (change_color_scheme), self);
     g_action_map_add_action (G_ACTION_MAP (self), G_ACTION (dark_action));
