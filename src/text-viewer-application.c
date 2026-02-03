@@ -57,18 +57,32 @@ text_viewer_application_dispose(GObject *gobject)
 static void
 text_viewer_application_activate (GApplication *app)
 {
-	GtkWindow *window;
+    TextViewerApplication *self = TEXT_VIEWER_APPLICATION (app);
+    GtkWindow *window;
 
-	g_assert (TEXT_VIEWER_IS_APPLICATION (app));
+    gboolean dark_mode =
+        g_settings_get_boolean (self->settings, "dark-mode");
 
-	window = gtk_application_get_active_window (GTK_APPLICATION (app));
+    AdwStyleManager *style_manager =
+        adw_style_manager_get_default ();
 
-	if (window == NULL)
-		window = g_object_new (TEXT_VIEWER_TYPE_WINDOW,
-		                       "application", app,
-		                       NULL);
+    adw_style_manager_set_color_scheme (
+        style_manager,
+        dark_mode
+        ? ADW_COLOR_SCHEME_FORCE_DARK
+        : ADW_COLOR_SCHEME_DEFAULT
+    );
 
-	gtk_window_present (window);
+    g_assert (TEXT_VIEWER_IS_APPLICATION (app));
+
+    window = gtk_application_get_active_window (GTK_APPLICATION (app));
+
+    if (window == NULL)
+	window = g_object_new (TEXT_VIEWER_TYPE_WINDOW,
+	                       "application", app,
+	                       NULL);
+
+    gtk_window_present (window);
 }
 
 static void
@@ -163,13 +177,13 @@ text_viewer_application_init (TextViewerApplication *self)
 {
     self->settings = g_settings_new ("com.example.TextViewer");
 
-    gboolean dark_mode = g_settings_get_boolean(self->settings, "dark-mode");
-    AdwStyleManager *style_manager = adw_style_manager_get_default();
+    gboolean dark_mode = g_settings_get_boolean (self->settings, "dark-mode");
+    /* AdwStyleManager *style_manager = adw_style_manager_get_default (); */
 
-    if (dark_mode)
-        adw_style_manager_set_color_scheme (style_manager, ADW_COLOR_SCHEME_FORCE_DARK);
-    else
-        adw_style_manager_set_color_scheme (style_manager, ADW_COLOR_SCHEME_DEFAULT);
+    /* if (dark_mode) */
+    /*     adw_style_manager_set_color_scheme (style_manager, ADW_COLOR_SCHEME_FORCE_DARK); */
+    /* else */
+    /*     adw_style_manager_set_color_scheme (style_manager, ADW_COLOR_SCHEME_DEFAULT); */
 
     g_autoptr (GSimpleAction) dark_action = g_simple_action_new_stateful ("dark-mode", NULL, g_variant_new_boolean (dark_mode));
     g_signal_connect(dark_action, "activate", G_CALLBACK(toggle_dark_mode), self);
